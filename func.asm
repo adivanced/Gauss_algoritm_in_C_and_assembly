@@ -116,12 +116,15 @@ align 8
 one_diagonal: ; rdi - height, rsi - equ, rdx - width
 	mov r8, rdx
 	xor r9, r9 
+	lea r11, [r8*4]
+	;xor rax, rax
+	mov rax, rsi
 
 		._loop:
-				mov rax, r8
-				xor rdx, rdx
-				mul r9
-				lea rax, [rsi+rax*4]
+				;mov rax, r8
+				;xor rdx, rdx
+				;mul r9
+				;lea rax, [rsi+rax*4]
 
 				mov edx, 0x3F800000
 				movd xmm1, edx
@@ -130,9 +133,9 @@ one_diagonal: ; rdi - height, rsi - equ, rdx - width
 				vbroadcastss ymm3, xmm1
 
 				mov rcx, r8
-				shr rcx, 3
+				;shr rcx, 3
 				;dec rcx
-				shl rcx, 5
+				shl rcx, 2
 				add rax, rcx
 				shr rcx, 5
 				;inc rcx
@@ -150,155 +153,170 @@ one_diagonal: ; rdi - height, rsi - equ, rdx - width
 			shr rcx, 5
 			inc rcx
 
+			add rax, r11
 			inc r9
 			cmp r9, rdi
 		jnz ._loop
 ret
 
 
+
+
 align 8
-gauss: ; rdi - answ, rsi - equ, rdx - width, rcx - height
-	mov r8, rdx ; preserve width, since rdx is used by mul
-	xor r9, r9  ; height counter
-	;push rdi
+gauss:
+	; rdx - width, rdi - unused, rsi - equ, rcx - height  [rdx*4] - width in bytes
+	;push r12
+	xor r9, r9
 
-		._loop_straight:
-			mov rax, r8
-			xor rdx, rdx
-			mul r9
-			mov r11, rax
-			lea r11, [rsi+r11*4]
-			lea r10, [r9+1]
+	;lea rax, [rsi+rdx*4]
+	mov rax, rsi
+	._loop_straight:	
+		lea r10, [r9+1]
+		cmp r10, rcx
+		jz ._backw
+		lea r11, [rax+rdx*4]
+		._loop_straight_mul:
+			movss xmm2, [r11+r9*4]
+			pxor xmm4, xmm4
+			cmpss xmm4, xmm2, 0
+			movd edi, xmm4
+			and edi, edi
+			jnz ._loop_straight_mul_zeroed
+
+			movss xmm1, [rax+r9*4]
+			vdivss xmm1, xmm2, xmm1
+
+			vbroadcastss ymm4, xmm1
+
+			mov rdi, rdx
+			lea rax, [rax+rdx*4]
+			shr rdi, 3
+			lea r11, [r11+rdx*4]
+
+			._sm_loop:
+				sub rax, 32
+				sub r11, 32
+				vmovups ymm0, [rax]
+				vmulps ymm3, ymm0, ymm4
+				vmovups ymm1, [r11]
+				vsubps ymm1, ymm1, ymm3
+				vmovups [r11], ymm1
+
+				dec rdi
+			jnz ._sm_loop
+
+			._loop_straight_mul_zeroed:
+			inc r10
+			lea r11, [r11+rdx*4]
 			cmp r10, rcx
-			jz ._backw
-			;vmovups ymm0, [r11]
-			._loop_straight_mul:
-				mov rax, r8
-				xor rdx, rdx
-				mul r10
-				lea rax, [rsi+rax*4]
+			jnz ._loop_straight_mul
+		;lea r10, [r9+1]
+		lea r11, [rax+rdx*4]
+		pxor xmm4, xmm4
+		movss xmm0, [r11+r9*4+4]
+		cmpss xmm4, xmm0, 0
+		movd edi, xmm4
+		and edi, edi
+		jnz ._diag_next_zero_straight
+		._fixed_kinda:
+		inc r9
+		lea rax, [rax+rdx*4]
+		cmp r9, rcx
+	jnz ._loop_straight
 
-				movss xmm1, [r11+r9*4]
-				movss xmm2, [rax+r9*4]
-				pxor xmm4, xmm4
-				cmpss xmm4, xmm2, 0
-				movd edx, xmm4
-				and edx, edx
-				jnz ._loop_straight_mul_zeroed
-
-				vdivss xmm1, xmm2, xmm1
-
-				;movss [rax+r9*4], xmm1
-				;jmp ._loop_straight_1ymm_mul_zeroed
-
-				vbroadcastss ymm4, xmm1
-
-				mov rdi, r8
-				shr rdi, 3
-				;dec rcx
-				shl rdi, 5
-				add rax, rdi
-				add r11, rdi
-				shr rdi, 5
-				;inc rcx
-
-				._sm_loop:
-					sub rax, 32
-					sub r11, 32
-					vmovups ymm0, [r11]
-					vmulps ymm3, ymm0, ymm4
-					vmovups ymm1, [rax]
-					vsubps ymm1, ymm1, ymm3
-					vmovups [rax], ymm1
-
-					dec rdi
-				jnz ._sm_loop
-
-
-				._loop_straight_mul_zeroed:
-
-				inc r10
-				cmp r10, rcx
-				jnz ._loop_straight_mul
-
-
-			inc r9
-			cmp r9, rcx
-			jnz ._loop_straight
-		
-		._backw:	
-		lea r9, [rcx-1] 
-
-		;mov rax, 228
-		;ret
-
+	._backw:
+		lea rdi, [rdx*4]
+		;sub rax, rdi
+		;dec r9
 		._loop_backward:
-			mov rax, r8
-			xor rdx, rdx
-			mul r9
 			mov r11, rax
-			lea r11, [rsi+r11*4]
+			sub r11, rdi
 			lea r10, [r9-1]
-			cmp r10, 0
-			jl .end
-			;vmovups ymm0, [r11]
+			;cmp r10, 0
+			and r9, r9
+			jz .end
 			._loop_backward_mul:
-				mov rax, r8
-				xor rdx, rdx
-				mul r10
-				lea rax, [rsi+rax*4]
-
-				movss xmm1, [r11+r9*4]
-				movss xmm2, [rax+r9*4]
 				pxor xmm4, xmm4
+				movss xmm2, [r11+r9*4]
 				cmpss xmm4, xmm2, 0
-				movd edx, xmm4
-				and edx, edx
+				movd r8d, xmm4
+				and r8d, r8d
 				jnz ._loop_backward_mul_zeroed
-
+				movss xmm1, [rax+r9*4]
 				vdivss xmm1, xmm2, xmm1
-
-				;movss [rax+r9*4], xmm1
-				;jmp ._loop_straight_1ymm_mul_zeroed
 
 				vbroadcastss ymm4, xmm1
 
-				mov rdi, r8
-				shr rdi, 3
-				;dec rcx
-				shl rdi, 5
-				add rax, rdi
-				add r11, rdi
-				shr rdi, 5
-				;inc rcx
+				mov r8, rdx
+				lea rax, [rax+rdx*4]
+				lea r11, [r11+rdx*4]
+				shr r8, 3
 
 				._sm_loop_bckw:
 					sub rax, 32
 					sub r11, 32
-					vmovups ymm0, [r11]
-					vmulps ymm3, ymm0, ymm4
-					vmovups ymm1, [rax]
-					vsubps ymm1, ymm1, ymm3
-					vmovups [rax], ymm1
 
-					dec rdi
+					vmovups ymm0, [rax]
+					vmulps ymm3, ymm0, ymm4
+					vmovups ymm1, [r11]
+					vsubps ymm1, ymm1, ymm3
+					vmovups [r11], ymm1
+
+					dec r8
 				jnz ._sm_loop_bckw
 
-
 				._loop_backward_mul_zeroed:
-
+				sub r11, rdi
 				dec r10
 				cmp r10, 0
-				jge ._loop_backward_mul
-
-
+			jge ._loop_backward_mul
+			sub rax, rdi
 			dec r9
-			jnz ._loop_backward			
+		jnz ._loop_backward
 
-
-.end:
-xor rax, rax
+	.end:
+	;pop r12
+	xor rax, rax
 ret
+
+._diag_next_zero_straight:
+	lea r10, [r9+2]
+	cmp r10, rcx
+	jae ._fixed_kinda
+	._diag_next_zero_straight_loop:
+		lea r8, [r11+rdx*4]
+
+		pxor xmm4, xmm4
+		movss xmm0, [r8+r9*4+4]
+		cmpss xmm4, xmm0, 0
+		movd edi, xmm4
+		and edi, edi
+		jz ._diag_next_zero_straight_loop_add
+		inc r10
+		lea r8, [r8+rdx*4]
+		cmp r10, rcx
+	jnz ._diag_next_zero_straight_loop
+	jmp ._fixed_kinda
+
+	._diag_next_zero_straight_loop_add:
+		mov rdi, rdx
+		lea r8, [r8+rdx*4]
+		lea r11, [r11+rdx*4]
+		shr rdi, 3
+
+		._diag_next_zero_straight_loop_add_sm_loop:
+			sub r8, 32
+			sub r11, 32
+			vmovups ymm0, [r11]
+			vmovups ymm1, [r8]
+			vaddps ymm0, ymm0, ymm1
+			vmovups [r11], ymm0
+			dec rdi
+		jnz ._diag_next_zero_straight_loop_add_sm_loop
+	jmp ._fixed_kinda
+
+
+
 
 align 8
 extransw: ; rsi - equ, rdi - answbuf, rcx - height, rdx - width
@@ -485,74 +503,64 @@ ret
 
 
 determinant_fpu: ; rdi - det ptr, rsi - ptr to equ copy, rdx - width, rcx - height
-	mov r8, rdx ; preserve width, since rdx is used by mul
-	xor r9, r9  ; height counter
+	xor r9, r9
 	push rdi
-	;push rdi
 
-		._loop_straight:
-			mov rax, r8
-			xor rdx, rdx
-			mul r9
-			mov r11, rax
-			lea r11, [rsi+r11*4]
-			lea r10, [r9+1]
+	;lea rax, [rsi+rdx*4]
+	mov rax, rsi
+	._loop_straight:	
+		lea r10, [r9+1]
+		cmp r10, rcx
+		jz ._mul_diag
+		lea r11, [rax+rdx*4]
+		._loop_straight_mul:
+			movss xmm2, [r11+r9*4]
+			pxor xmm4, xmm4
+			cmpss xmm4, xmm2, 0
+			movd edi, xmm4
+			and edi, edi
+			jnz ._loop_straight_mul_zeroed
+
+			movss xmm1, [rax+r9*4]
+			vdivss xmm1, xmm2, xmm1
+
+			vbroadcastss ymm4, xmm1
+
+			mov rdi, rdx
+			lea rax, [rax+rdx*4]
+			shr rdi, 3
+			lea r11, [r11+rdx*4]
+
+			._sm_loop:
+				sub rax, 32
+				sub r11, 32
+				vmovups ymm0, [rax]
+				vmulps ymm3, ymm0, ymm4
+				vmovups ymm1, [r11]
+				vsubps ymm1, ymm1, ymm3
+				vmovups [r11], ymm1
+
+				dec rdi
+			jnz ._sm_loop
+
+			._loop_straight_mul_zeroed:
+			inc r10
+			lea r11, [r11+rdx*4]
 			cmp r10, rcx
-			jz ._mul_diag
-			;vmovups ymm0, [r11]
-			._loop_straight_mul:
-				mov rax, r8
-				xor rdx, rdx
-				mul r10
-				lea rax, [rsi+rax*4]
-
-				movss xmm1, [r11+r9*4]
-				movss xmm2, [rax+r9*4]
-				pxor xmm4, xmm4
-				cmpss xmm4, xmm2, 0
-				movd edx, xmm4
-				and edx, edx
-				jnz ._loop_straight_mul_zeroed
-
-				vdivss xmm1, xmm2, xmm1
-
-				;movss [rax+r9*4], xmm1
-				;jmp ._loop_straight_1ymm_mul_zeroed
-
-				vbroadcastss ymm4, xmm1
-
-				mov rdi, r8
-				shr rdi, 3
-				;dec rcx
-				shl rdi, 5
-				add rax, rdi
-				add r11, rdi
-				shr rdi, 5
-				;inc rcx
-
-				._sm_loop:
-					sub rax, 32
-					sub r11, 32
-					vmovups ymm0, [r11]
-					vmulps ymm3, ymm0, ymm4
-					vmovups ymm1, [rax]
-					vsubps ymm1, ymm1, ymm3
-					vmovups [rax], ymm1
-
-					dec rdi
-				jnz ._sm_loop
-
-
-				._loop_straight_mul_zeroed:
-
-				inc r10
-				cmp r10, rcx
-				jnz ._loop_straight_mul
-
-
-			inc r9
-			cmp r9, rcx
-			jnz ._loop_straight
+			jnz ._loop_straight_mul
+		;lea r10, [r9+1]
+		lea r11, [rax+rdx*4]
+		pxor xmm4, xmm4
+		movss xmm0, [r11+r9*4+4]
+		cmpss xmm4, xmm0, 0
+		movd edi, xmm4
+		and edi, edi
+		jnz ._diag_next_zero_straight
+		._fixed_kinda:
+		inc r9
+		lea rax, [rax+rdx*4]
+		cmp r9, rcx
+	jnz ._loop_straight
 
 
 		._mul_diag:
@@ -572,7 +580,44 @@ determinant_fpu: ; rdi - det ptr, rsi - ptr to equ copy, rdx - width, rcx - heig
 	xor rax, rax
 ret
 
+._diag_next_zero_straight: ; r10 - row number with zero
+	lea r12, [r10+1]
 
+	._diag_next_zero_straight_loop:
+		mov rax, r8
+		xor rdx, rdx
+		mul r12
+		lea rax, [rsi+rax*4]
+
+		pxor xmm4, xmm4
+		movss xmm0, [rax+r10*4]
+		cmpss xmm4, xmm0, 0
+		movd edx, xmm4
+		and edx, edx 
+		jz ._diag_next_zero_straight_loop_add
+		inc r12
+		cmp r12, rcx
+	jnz ._diag_next_zero_straight_loop
+	jmp ._fixed_kinda
+
+	._diag_next_zero_straight_loop_add:
+		mov rdx, r8
+
+		shl rdx, 2
+		add rax, rdx
+		add r11, rdx
+		shr rdx, 5
+
+		._diag_next_zero_straight_loop_add_sm_loop:
+			sub rax, 32
+			sub r11, 32
+			vmovups ymm0, [r11]
+			vmovups ymm1, [rax]
+			vaddps ymm0, ymm0, ymm1
+			vmovups [r11], ymm0
+			dec rdx
+		jnz ._diag_next_zero_straight_loop_add
+	jmp ._fixed_kinda
 
 ; align 8
 ; swap_rows: ; rdi - height, rsi - ptr to equ, rdx - width
@@ -736,19 +781,5 @@ ret
 ; ret
 
 
-; align 8
-; calculate:  ; rdi - ptr to answ, rsi - ptr to equ, rdx - height, rcx - width
-; 	shr rcx, 3
-; 	cmp rcx, 1
-; 	je ._1ymm
-; 	cmp rcx, 2
-; 	je ._2ymm
-; 	cmp rcx, 3
-; 	je ._3ymm
 
-
-
-
-
-; ret
 
